@@ -1,0 +1,144 @@
+import numpy as np
+from scipy.stats import spearmanr
+
+
+class CorrelationUncertainty:
+    """
+    Compute Spearman correlation under measurement uncertainty using:
+
+    - Monte Carlo perturbation sampling
+    - Bootstrap resampling
+    - Composite (MC + bootstrap) sampling
+    """
+
+    def __init__(self, x, y, xerr=None, yerr=None):
+        self.x = np.asarray(x)
+        self.y = np.asarray(y)
+        self.xerr = xerr
+        self.yerr = yerr
+        self._validate_inputs()
+
+    def _validate_inputs(self):
+        """Validate shapes and convert errors to 2xN arrays."""
+
+        self.x = np.asarray(self.x)
+        self.y = np.asarray(self.y)
+
+        self.xerr = self._validate_error(self.xerr, len(self.x))
+        self.yerr = self._validate_error(self.yerr, len(self.y))
+
+        if len(self.x) != len(self.y):
+            raise ValueError("x and y must have the same length")
+
+        if self.xerr.shape != (2, len(self.x)):
+            raise ValueError("xerr must have shape (2, len(x))")
+
+        if self.yerr.shape != (2, len(self.y)):
+            raise ValueError("yerr must have shape (2, len(y))")
+
+    def _validate_error(self, err, n):
+        """Convert error input into a (2, n) array."""
+        if err is None:
+            return np.zeros((2, n))
+
+        err = np.asarray(err)
+        if err.ndim == 1:  # symmetric error provided
+            return np.vstack([err, err])
+
+        return err
+
+    def split_normal(self, mu, sigma_left, sigma_right, size=1):
+        """
+        Sample from a split (asymmetric) normal distribution.
+        Left and right std devs determine which side is used.
+        """
+        mu = np.asarray(mu)
+        sigma_left = np.asarray(sigma_left)
+        sigma_right = np.asarray(sigma_right)
+
+        zero_mask = (sigma_left == 0) & (sigma_right == 0)
+        if np.all(zero_mask):
+            return np.full(size, mu)
+
+        rng = np.random.default_rng()
+        u = rng.uniform(0, 1, size=size)
+
+        return np.where(
+            u < (sigma_left / (sigma_left + sigma_right)),
+            rng.normal(loc=mu, scale=sigma_left, size=size),
+            rng.normal(loc=mu, scale=sigma_right, size=size),
+        )
+
+    def prepare_samples_mc(self, n, indices=None):
+        """Prepare Monte Carlo perturbed samples for x and y."""
+
+        if indices is not None:
+            x = self.x[indices]
+            y = self.y[indices]
+            xerr = self.xerr[:, indices]
+            yerr = self.yerr[:, indices]
+        else:
+            x = self.x
+            y = self.y
+            xerr = self.xerr
+            yerr = self.yerr
+
+        x_samples = self.split_normal(x, xerr[0], xerr[1], size=(n, len(x)))
+        y_samples = self.split_normal(y, yerr[0], yerr[1], size=(n, len(y)))
+        return x_samples, y_samples
+
+    # ----------------------------------------------------------------------
+    # Public methods
+    # ----------------------------------------------------------------------
+    def perturbation(self, n=10000):
+        """
+        Monte Carlo perturbation sampling.
+        Returns arrays of rho and p values.
+        """
+        x_samples, y_samples = self.prepare_samples_mc(n)
+
+        rhos = np.empty(n)
+        pvals = np.empty(n)
+
+        for i in range(n):
+            rhos[i], pvals[i] = spearmanr(x_samples[i], y_samples[i])
+
+        return rhos, pvals
+
+    def bootstrap(self, n=10000):
+        """
+        Standard bootstrap sampling of (x, y) pairs.
+        """
+        rng = np.random.default_rng()
+        indices = rng.integers(0, len(self.x), size=(n, len(self.x)))
+
+        rhos = np.empty(n)
+        pvals = np.empty(n)
+
+        for i in range(n):
+            rhos[i], pvals[i] = spearmanr(
+                self.x[indices[i]],
+                self.y[indices[i]],
+            )
+
+        return rhos, pvals
+
+    def composite(self, n=10000):
+        """
+        Composite method:
+        bootstrap indices + Monte Carlo perturbation for each bootstrap sample.
+        """
+
+        rng = np.random.default_rng()
+        indices = rng.integers(0, len(self.x), size=(n, len(self.x)))
+
+        rhos = np.empty(n)
+        pvals = np.empty(n)
+
+        for i, idx in enumerate(indices):
+            x_s, y_s = self.prepare_samples_mc(1, indices=idx)
+            x_s = x_s.flatten()
+            y_s = y_s.flatten()
+            rhos[i], pvals[i] = spearmanr(x_s, y_s)
+
+        return rhos, pvals
