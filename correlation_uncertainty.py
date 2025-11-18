@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.stats import spearmanr
+from scipy.stats import spearmanr, norm
 
 
 class CorrelationUncertainty:
@@ -142,3 +142,64 @@ class CorrelationUncertainty:
             rhos[i], pvals[i] = spearmanr(x_s, y_s, nan_policy=self.nan_policy)
 
         return rhos, pvals
+
+    def compare_methods(self, n=10000, print_summary=True):
+        """
+        Compare all three methods + a standard calculation without uncertainty.
+        Returns a dictionary of results or/and prints the summary.
+        """
+        results = {}
+
+        rho, pval = spearmanr(self.x, self.y, nan_policy=self.nan_policy)
+        results["standard"] = {rho, pval}
+        rhos, pvals = self.perturbation(n)
+        results["perturbation"] = self.summarise(rhos, pvals)
+        rhos, pvals = self.bootstrap(n)
+        results["bootstrap"] = self.summarise(rhos, pvals)
+        rhos, pvals = self.composite(n)
+        results["composite"] = self.summarise(rhos, pvals)
+
+        if print_summary:
+            rho, pval = results["standard"]
+            pval = f"{pval:.2e}" if pval < 0.001 else f"{pval:.3f}"
+            print(f"Standard method: {rho:.2f} (p={pval})")
+            print(f"---" * 5)
+            for method, summary in results.items():
+                if method == "standard":
+                    continue
+                print(method.capitalize())
+                self.print_summary(summary)
+                print(f"---" * 5)
+
+    @staticmethod
+    def summarise(rhos, pvals, sigma=1, significance_level=0.05):
+        """
+        Summarise correlation results with median, std of rho and C.I. of p-values and significance fraction of p<0.05.
+        """
+        sigma = norm.sf(sigma)
+        return {
+            "rho_median": np.median(rhos),
+            "rho_std": np.std(rhos),
+            "rho_ci": (
+                np.percentile(rhos, sigma * 100),  # 15.9th percentile
+                np.percentile(rhos, (1 - sigma) * 100),
+            ),
+            "pval_median": np.median(pvals),
+            "significant_fraction": np.sum(pvals < significance_level) / len(pvals),
+        }
+
+    @staticmethod
+    def print_summary(summary):
+        """
+        Print summary dictionary in a readable format.
+        """
+        rho_median = f'Rho median: {summary["rho_median"]:.2f} ± {summary["rho_std"]:.2f}'
+        cis = f'CI: ({summary["rho_ci"][0]:.2f}, {summary["rho_ci"][1]:.2f})'
+        pval_median = summary["pval_median"]
+        if pval_median < 0.001:
+            pval_str = f"P-value median: {pval_median:.2e}"
+        else:
+            pval_str = f"P-value median: {pval_median:.3f}"
+        signif_frac = f'Significant fraction (p < 0.05): {summary["significant_fraction"]:.2%}'
+
+        print(rho_median, cis, pval_str, signif_frac, sep="\n")
