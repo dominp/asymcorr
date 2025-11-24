@@ -108,12 +108,11 @@ class CorrelationUncertainty:
         x_samples, y_samples = self.prepare_samples_mc(n)
 
         rhos = np.empty(n)
-        pvals = np.empty(n)
 
         for i in range(n):
-            rhos[i], pvals[i] = spearmanr(x_samples[i], y_samples[i], nan_policy=self.nan_policy)
+            rhos[i], _ = spearmanr(x_samples[i], y_samples[i], nan_policy=self.nan_policy)
 
-        return rhos, pvals
+        return rhos
 
     def bootstrap(self, n=10000):
         """
@@ -122,16 +121,15 @@ class CorrelationUncertainty:
         indices = self.rng.integers(0, len(self.x), size=(n, len(self.x)))
 
         rhos = np.empty(n)
-        pvals = np.empty(n)
 
         for i in range(n):
-            rhos[i], pvals[i] = spearmanr(
+            rhos[i], _ = spearmanr(
                 self.x[indices[i]],
                 self.y[indices[i]],
                 nan_policy=self.nan_policy,
             )
 
-        return rhos, pvals
+        return rhos
 
     def composite(self, n=10000):
         """
@@ -142,15 +140,14 @@ class CorrelationUncertainty:
         indices = self.rng.integers(0, len(self.x), size=(n, len(self.x)))
 
         rhos = np.empty(n)
-        pvals = np.empty(n)
 
         for i, idx in enumerate(indices):
             x_s, y_s = self.prepare_samples_mc(1, indices=idx)
             x_s = x_s.flatten()
             y_s = y_s.flatten()
-            rhos[i], pvals[i] = spearmanr(x_s, y_s, nan_policy=self.nan_policy)
+            rhos[i], _ = spearmanr(x_s, y_s, nan_policy=self.nan_policy)
 
-        return rhos, pvals
+        return rhos
 
     def compare_methods(self, n=10000, print_summary=True):
         """
@@ -161,12 +158,12 @@ class CorrelationUncertainty:
 
         rho, pval = spearmanr(self.x, self.y, nan_policy=self.nan_policy)
         results["standard"] = {rho, pval}
-        rhos, pvals = self.perturbation(n)
-        results["perturbation"] = self.summarise(rhos, pvals)
-        rhos, pvals = self.bootstrap(n)
-        results["bootstrap"] = self.summarise(rhos, pvals)
-        rhos, pvals = self.composite(n)
-        results["composite"] = self.summarise(rhos, pvals)
+        rhos = self.perturbation(n)
+        results["perturbation"] = self.summarise(rhos)
+        rhos = self.bootstrap(n)
+        results["bootstrap"] = self.summarise(rhos)
+        rhos = self.composite(n)
+        results["composite"] = self.summarise(rhos)
 
         if print_summary:
             rho, pval = results["standard"]
@@ -181,7 +178,7 @@ class CorrelationUncertainty:
                 print(f"---" * 5)
 
     @staticmethod
-    def summarise(rhos, pvals, sigma=1, significance_level=0.05):
+    def summarise(rhos, sigma=1):
         """
         Summarise correlation results with median, std of rho and C.I. of p-values and significance fraction of p<0.05.
         """
@@ -192,9 +189,7 @@ class CorrelationUncertainty:
             "rho_ci": (
                 np.percentile(rhos, sigma * 100),  # 15.9th percentile
                 np.percentile(rhos, (1 - sigma) * 100),
-            ),
-            "pval_median": np.median(pvals),
-            "significant_fraction": np.sum(pvals < significance_level) / len(pvals),
+            )
         }
 
     @staticmethod
@@ -204,11 +199,6 @@ class CorrelationUncertainty:
         """
         rho_median = f'Rho median: {summary["rho_median"]:.2f} ± {summary["rho_std"]:.2f}'
         cis = f'CI: ({summary["rho_ci"][0]:.2f}, {summary["rho_ci"][1]:.2f})'
-        pval_median = summary["pval_median"]
-        if pval_median < 0.001:
-            pval_str = f"P-value median: {pval_median:.2e}"
-        else:
-            pval_str = f"P-value median: {pval_median:.3f}"
         signif_frac = f'Significant fraction (p < 0.05): {summary["significant_fraction"]:.2%}'
 
-        print(rho_median, cis, pval_str, signif_frac, sep="\n")
+        print(rho_median, cis sep="\n")
