@@ -27,7 +27,7 @@ class CorrelationUncertainty:
 
         if len(self.x) != len(self.y) or len(self.x) == 0:
             raise ValueError("x and y must have the same non-zero length")
-        
+
         self.xerr = self._validate_error(self.xerr, len(self.x))
         self.yerr = self._validate_error(self.yerr, len(self.y))
 
@@ -35,7 +35,6 @@ class CorrelationUncertainty:
             raise ValueError("nan_policy must be one of 'propagate', 'raise', or 'omit'")
         if self.nan_policy == "raise" and (np.isnan(self.x).any() or np.isnan(self.y).any()):
             raise ValueError("Input data contains NaNs, but nan_policy is set to 'raise'")
-
 
     def _validate_error(self, err, n):
         if err is None:
@@ -48,8 +47,8 @@ class CorrelationUncertainty:
             if np.any(err < 0):
                 raise ValueError("Errors must be non-negative")
             return np.vstack([err, err])
-    
-        elif err.ndim ==2:
+
+        elif err.ndim == 2:
             if err.shape != (2, n):
                 raise ValueError("Asymmetric error array must have shape (2, len(data))")
             if np.any(err < 0):
@@ -106,7 +105,6 @@ class CorrelationUncertainty:
         Returns arrays of rho and p values.
         """
         x_samples, y_samples = self.prepare_samples_mc(n)
-
         rhos = np.empty(n)
 
         for i in range(n):
@@ -140,7 +138,6 @@ class CorrelationUncertainty:
         indices = self.rng.integers(0, len(self.x), size=(n, len(self.x)))
 
         rhos = np.empty(n)
-
         for i, idx in enumerate(indices):
             x_s, y_s = self.prepare_samples_mc(1, indices=idx)
             x_s = x_s.flatten()
@@ -148,6 +145,14 @@ class CorrelationUncertainty:
             rhos[i], _ = spearmanr(x_s, y_s, nan_policy=self.nan_policy)
 
         return rhos
+
+    def _fisher_transformation(self, rho):
+        rho = np.clip(rho, -0.9999, 0.9999)
+        return np.arctanh(rho)
+
+    def z_score(self, rho, N):
+        """Compute z-score for Spearman's rho using Fisher transformation."""
+        return self._fisher_transformation(rho) * np.sqrt((N - 3) / 1.06)
 
     def compare_methods(self, n=10000, print_summary=True):
         """
@@ -178,27 +183,40 @@ class CorrelationUncertainty:
                 print(f"---" * 5)
 
     @staticmethod
-    def summarise(rhos, sigma=1):
+    def summarise(rhos, sigma=1, z_score=None):
         """
         Summarise correlation results with median, std of rho and C.I. of p-values and significance fraction of p<0.05.
         """
         sigma = norm.sf(sigma)
-        return {
-            "rho_median": np.median(rhos),
+        if z_score is not None:
+            z_mean = np.mean(z_score)
+            z_std = np.std(z_score)
+        else:
+            z_mean = None
+            z_std = None
+
+        output = {
+            "rho_mean": np.mean(rhos),
             "rho_std": np.std(rhos),
             "rho_ci": (
                 np.percentile(rhos, sigma * 100),  # 15.9th percentile
                 np.percentile(rhos, (1 - sigma) * 100),
-            )
+            ),
+            "z_mean": z_mean,
+            "z_std": z_std,
         }
+        return output
 
     @staticmethod
     def print_summary(summary):
         """
         Print summary dictionary in a readable format.
         """
-        rho_median = f'Rho median: {summary["rho_median"]:.2f} ± {summary["rho_std"]:.2f}'
+        rho_median = f'Rho mean: {summary["rho_mean"]:.2f} ± {summary["rho_std"]:.2f}'
         cis = f'CI: ({summary["rho_ci"][0]:.2f}, {summary["rho_ci"][1]:.2f})'
-        signif_frac = f'Significant fraction (p < 0.05): {summary["significant_fraction"]:.2%}'
-
-        print(rho_median, cis sep="\n")
+        z_score = (
+            f'Z mean: {summary["z_mean"]:.2f} ± {summary["z_std"]:.2f}'
+            if summary["z_mean"] is not None
+            else "Z mean: N/A"
+        )
+        print(rho_median, cis, z_score, sep="\n")
