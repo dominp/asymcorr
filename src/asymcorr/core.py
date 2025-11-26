@@ -57,6 +57,27 @@ class CorrelationUncertainty:
         else:
             raise ValueError("Error array must be 1D or 2D")
 
+
+    def _compute_pearson(self,x_samples,y_samples):
+        """Compute Pearson correlation for each sample pair."""
+        
+        x_centred = x_samples - np.mean(x_samples, axis=1, keepdims=True)
+        y_centred = y_samples - np.mean(y_samples, axis=1, keepdims=True)
+
+        numerator = np.sum(x_centred * y_centred, axis=1)
+        denominator = np.sqrt(np.sum(x_centred**2, axis=1) * np.sum(y_centred**2, axis=1))
+        return numerator / denominator
+    
+    def _compute_spearman(self,x_samples,y_samples):
+        """Compute Spearman correlation for each sample pair."""
+
+        x_ranks = np.apply_along_axis(lambda x: np.argsort(np.argsort(x)), 1, x_samples)
+        y_ranks = np.apply_along_axis(lambda y: np.argsort(np.argsort(y)), 1, y_samples)
+        return self._compute_pearson(x_ranks, y_ranks)
+
+
+
+
     def split_normal(self, mu, sigma_left, sigma_right, size=1):
         """
         Sample from a split (asymmetric) normal distribution.
