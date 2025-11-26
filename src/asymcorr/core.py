@@ -131,24 +131,26 @@ class CorrelationUncertainty:
     # ----------------------------------------------------------------------
     # Public methods
     # ----------------------------------------------------------------------
-    def perturbation(self, n=10000, method='spearman'):
+    def perturbation(self, n=10000, method='spearman', return_z_score=True):
         """
         Monte Carlo perturbation sampling.
         Returns arrays of rho and p values.
         """
         x_samples, y_samples = self.prepare_samples_mc(n)
-        return self.compute_correlation(x_samples, y_samples, method=method)
+        rhos =  self.compute_correlation(x_samples, y_samples, method=method)
+        return self._return_z_scores(return_z_score, rhos, len(self.x))
 
-    def bootstrap(self, n=10000, method='spearman'):
+    def bootstrap(self, n=10000, method='spearman', return_z_score=True):
         """
         Standard bootstrap sampling of (x, y) pairs.
         """
         indices = self.rng.integers(0, len(self.x), size=(n, len(self.x)))
         x_samples = self.x[indices]
         y_samples = self.y[indices]
-        return self.compute_correlation(x_samples, y_samples, method=method)
+        rhos =  self.compute_correlation(x_samples, y_samples, method=method)
+        return self._return_z_scores(return_z_score, rhos, len(self.x))
 
-    def composite(self, n=10000):
+    def composite(self, n=10000, method='spearman', return_z_score=True):
         """
         Composite method:
         bootstrap indices + Monte Carlo perturbation for each bootstrap sample.
@@ -156,7 +158,8 @@ class CorrelationUncertainty:
 
         indices = self.rng.integers(0, len(self.x), size=(n, len(self.x)))
         x_samples, y_samples = self.prepare_samples_mc(n, indices=indices)
-        return self.compute_correlation(x_samples, y_samples, method='spearman')
+        rhos =  self.compute_correlation(x_samples, y_samples, method=method)
+        return self._return_z_scores(return_z_score, rhos, len(self.x))
 
     def _fisher_transformation(self, rho):
         rho = np.clip(rho, -0.9999, 0.9999)
@@ -165,8 +168,16 @@ class CorrelationUncertainty:
     def z_score(self, rho, N):
         """Compute z-score for Spearman's rho using Fisher transformation."""
         return self._fisher_transformation(rho) * np.sqrt((N - 3) / 1.06)
+    
+    def _return_z_scores(self, return_z_score, rhos, N):
+        if return_z_score:
+            z_scores = self.z_score(rhos, N)
+            return rhos, z_scores
+        return rhos
 
-    def compare_methods(self, n=10000, method='spearman', print_summary=True):
+
+
+    def compare_methods(self, n=10000, method='spearman', print_summary=True, return_z_score=True):
         """
         Compare all three methods + a standard calculation without uncertainty.
         Returns a dictionary of results or/and prints the summary.
@@ -175,13 +186,12 @@ class CorrelationUncertainty:
 
         rho, pval = spearmanr(self.x, self.y, nan_policy=self.nan_policy)
         results["standard"] = {rho, pval}
-        rhos = self.perturbation(n, method=method)
-        results["perturbation"] = self.summarise(rhos)
-        rhos = self.bootstrap(n, method=method)
-        results["bootstrap"] = self.summarise(rhos)
-        rhos = self.composite(n, method=method)
-        results["composite"] = self.summarise(rhos)
-
+        rhos, z_score = self.perturbation(n, method=method, return_z_score=return_z_score)
+        results["perturbation"] = self.summarise(rhos, z_score=z_score)
+        rhos, z_score = self.bootstrap(n, method=method, return_z_score=return_z_score)
+        results["bootstrap"] = self.summarise(rhos, z_score=z_score)
+        rhos, z_score = self.composite(n, method=method, return_z_score=return_z_score)
+        results["composite"] = self.summarise(rhos, z_score=z_score)
         if print_summary:
             rho, pval = results["standard"]
             pval = f"{pval:.2e}" if pval < 0.001 else f"{pval:.3f}"
@@ -193,6 +203,7 @@ class CorrelationUncertainty:
                 print(method.capitalize())
                 self.print_summary(summary)
                 print(f"---" * 5)
+        return results
 
     @staticmethod
     def summarise(rhos, sigma=1, z_score=None):
