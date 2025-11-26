@@ -76,6 +76,15 @@ class CorrelationUncertainty:
         return self._compute_pearson(x_ranks, y_ranks)
 
 
+    def compute_correlation(self, x_samples, y_samples, method='spearman'):
+        
+        method = method.strip().lower()
+        if method == 'spearman':
+            return self._compute_spearman(x_samples, y_samples)
+        elif method == 'pearson':
+            return self._compute_pearson(x_samples, y_samples)
+        else:
+            raise ValueError("Method must be 'spearman' or 'pearson'")
 
 
     def split_normal(self, mu, sigma_left, sigma_right, size=1):
@@ -107,48 +116,37 @@ class CorrelationUncertainty:
             y = self.y[indices]
             xerr = self.xerr[:, indices]
             yerr = self.yerr[:, indices]
+            dims = x.shape
         else:
             x = self.x
             y = self.y
             xerr = self.xerr
             yerr = self.yerr
+            dims = (n, len(x))
 
-        x_samples = self.split_normal(x, xerr[0], xerr[1], size=(n, len(x)))
-        y_samples = self.split_normal(y, yerr[0], yerr[1], size=(n, len(y)))
+        x_samples = self.split_normal(x, xerr[0], xerr[1], size=dims)
+        y_samples = self.split_normal(y, yerr[0], yerr[1], size=dims)
         return x_samples, y_samples
 
     # ----------------------------------------------------------------------
     # Public methods
     # ----------------------------------------------------------------------
-    def perturbation(self, n=10000):
+    def perturbation(self, n=10000, method='spearman'):
         """
         Monte Carlo perturbation sampling.
         Returns arrays of rho and p values.
         """
         x_samples, y_samples = self.prepare_samples_mc(n)
-        rhos = np.empty(n)
+        return self.compute_correlation(x_samples, y_samples, method=method)
 
-        for i in range(n):
-            rhos[i], _ = spearmanr(x_samples[i], y_samples[i], nan_policy=self.nan_policy)
-
-        return rhos
-
-    def bootstrap(self, n=10000):
+    def bootstrap(self, n=10000, method='spearman'):
         """
         Standard bootstrap sampling of (x, y) pairs.
         """
         indices = self.rng.integers(0, len(self.x), size=(n, len(self.x)))
-
-        rhos = np.empty(n)
-
-        for i in range(n):
-            rhos[i], _ = spearmanr(
-                self.x[indices[i]],
-                self.y[indices[i]],
-                nan_policy=self.nan_policy,
-            )
-
-        return rhos
+        x_samples = self.x[indices]
+        y_samples = self.y[indices]
+        return self.compute_correlation(x_samples, y_samples, method=method)
 
     def composite(self, n=10000):
         """
@@ -157,15 +155,8 @@ class CorrelationUncertainty:
         """
 
         indices = self.rng.integers(0, len(self.x), size=(n, len(self.x)))
-
-        rhos = np.empty(n)
-        for i, idx in enumerate(indices):
-            x_s, y_s = self.prepare_samples_mc(1, indices=idx)
-            x_s = x_s.flatten()
-            y_s = y_s.flatten()
-            rhos[i], _ = spearmanr(x_s, y_s, nan_policy=self.nan_policy)
-
-        return rhos
+        x_samples, y_samples = self.prepare_samples_mc(n, indices=indices)
+        return self.compute_correlation(x_samples, y_samples, method='spearman')
 
     def _fisher_transformation(self, rho):
         rho = np.clip(rho, -0.9999, 0.9999)
@@ -175,7 +166,7 @@ class CorrelationUncertainty:
         """Compute z-score for Spearman's rho using Fisher transformation."""
         return self._fisher_transformation(rho) * np.sqrt((N - 3) / 1.06)
 
-    def compare_methods(self, n=10000, print_summary=True):
+    def compare_methods(self, n=10000, method='spearman', print_summary=True):
         """
         Compare all three methods + a standard calculation without uncertainty.
         Returns a dictionary of results or/and prints the summary.
@@ -184,11 +175,11 @@ class CorrelationUncertainty:
 
         rho, pval = spearmanr(self.x, self.y, nan_policy=self.nan_policy)
         results["standard"] = {rho, pval}
-        rhos = self.perturbation(n)
+        rhos = self.perturbation(n, method=method)
         results["perturbation"] = self.summarise(rhos)
-        rhos = self.bootstrap(n)
+        rhos = self.bootstrap(n, method=method)
         results["bootstrap"] = self.summarise(rhos)
-        rhos = self.composite(n)
+        rhos = self.composite(n, method=method)
         results["composite"] = self.summarise(rhos)
 
         if print_summary:
