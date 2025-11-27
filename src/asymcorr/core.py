@@ -11,7 +11,7 @@ class CorrelationUncertainty:
     - Composite (MC + bootstrap) sampling
     """
 
-    def __init__(self, x, y, xerr=None, yerr=None, random_state=None, nan_policy="propagate"):
+    def __init__(self, x, y, xerr=None, yerr=None, random_state=None, nan_policy="raise"):
         self.x = np.asarray(x)
         self.y = np.asarray(y)
         self.xerr = xerr
@@ -31,10 +31,11 @@ class CorrelationUncertainty:
         self.xerr = self._validate_error(self.xerr, len(self.x))
         self.yerr = self._validate_error(self.yerr, len(self.y))
 
-        if self.nan_policy not in ["propagate", "raise", "omit"]:
-            raise ValueError("nan_policy must be one of 'propagate', 'raise', or 'omit'")
-        if self.nan_policy == "raise" and (np.isnan(self.x).any() or np.isnan(self.y).any()):
-            raise ValueError("Input data contains NaNs, but nan_policy is set to 'raise'")
+        self.nan_policy = self.nan_policy.strip().lower()
+        if self.nan_policy not in [ "omit", "raise"]:
+            raise ValueError("nan_policy must be one of 'raise' or 'omit'")
+        self._nan_policy_filter()        
+
 
     def _validate_error(self, err, n):
         if err is None:
@@ -74,6 +75,25 @@ class CorrelationUncertainty:
         x_ranks = np.apply_along_axis(lambda x: np.argsort(np.argsort(x)), 1, x_samples)
         y_ranks = np.apply_along_axis(lambda y: np.argsort(np.argsort(y)), 1, y_samples)
         return self._compute_pearson(x_ranks, y_ranks)
+
+    def _nan_policy_filter(self):
+        """Apply nan_policy to filter data."""        
+        mask = np.isnan(self.x) | np.isnan(self.y)
+        mask |= np.isnan(self.xerr).any(axis=0) | np.isnan(self.yerr).any(axis=0)
+
+        if np.any(mask) and self.nan_policy == "raise":
+            raise ValueError("Input data contains NaNs, but nan_policy is set to 'raise'")
+        elif np.all(mask):
+            raise ValueError("All data points are NaNs")
+        
+        if self.nan_policy == "omit":    
+            self.x = self.x[~mask]
+            self.y = self.y[~mask]
+            self.xerr = self.xerr[:, ~mask]
+            self.yerr = self.yerr[:, ~mask]
+        
+
+
 
 
     def compute_correlation(self, x_samples, y_samples, method='spearman'):
